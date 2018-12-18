@@ -94,6 +94,8 @@ typedef struct {
 }cam_sync_related_sensors_event_info_t;
 
 /* Related camera sensor specific calibration data */
+// Align bytes according to API document.
+#pragma pack(2)
 typedef struct {
     /* Focal length in pixels @ calibration resolution.*/
     float       normalized_focal_length;
@@ -108,12 +110,15 @@ typedef struct {
     /* Focal length ratio @ Calibration */
     float       focal_length_ratio;
 }cam_related_sensor_calibration_data_t;
+#pragma pack()
 
 /* Related Camera System Calibration data
    Calibration data for the entire related cam sub-system is
    in a shared EEPROM. We have 2 fields which are specific to
    each sensor followed by a set of common calibration of the
    entire related cam system*/
+// Align bytes according to API document.
+#pragma pack(2)
 typedef struct {
     /* Version information */
     uint32_t    calibration_format_version;
@@ -142,9 +147,31 @@ typedef struct {
     uint16_t   module_orientation_during_calibration;
     /* cal images required rotation: 0-no, 1-90 degrees right, 2-90 degrees left */
     uint16_t   rotation_flag;
+    /* AEC sync OTP data */
+    /* AEC sync brightness ration. Fixed Point Q10*/
+    int16_t    brightness_ratio;
+    /* Reference mono gain value obtained from setup stage and used during calibration stage */
+    /* Fixed Point Q10 */
+    int16_t    ref_mono_gain;
+    /* Reference mono line count obtained from setup stage and used during calibration stage */
+    uint16_t   ref_mono_linecount;
+    /* Reference bayer gain value obtained from setup stage and used during calibration stage */
+    /* Fixed Point Q10 */
+    int16_t    ref_bayer_gain;
+    /* Reference bayer line count obtained from setup stage and used during calibration stage */
+    uint16_t   ref_bayer_linecount;
+    /* Reference bayer color temperature */
+    uint16_t   ref_bayer_color_temperature;
     /* Reserved for future use */
     float      reserved[RELCAM_CALIB_RESERVED_MAX];
 } cam_related_system_calibration_data_t;
+
+typedef struct {
+    int meta_type;
+    int data_len;
+    cam_related_system_calibration_data_t otp_data;
+} cam_otp_data_t;
+#pragma pack()
 
 typedef struct {
   uint32_t default_sensor_flip;
@@ -262,6 +289,11 @@ typedef struct{
     size_t zzhdr_sizes_tbl_cnt;                             /* Number of resolutions in zzHDR mode*/
     cam_dimension_t zzhdr_sizes_tbl[MAX_SIZES_CNT];         /* Table for ZZHDR supported sizes */
 
+    size_t supported_quadra_cfa_dim_cnt;              /* Number of resolutions in Quadra CFA mode */
+    cam_dimension_t quadra_cfa_dim[MAX_SIZES_CNT];    /* Table for Quadra CFA supported sizes */
+    cam_format_t quadra_cfa_format;                   /* Quadra CFA output format */
+    uint32_t is_remosaic_lib_present;                 /* Flag indicating if remosaic lib present */
+
     /* supported preview formats */
     size_t supported_preview_fmt_cnt;
     cam_format_t supported_preview_fmts[CAM_FORMAT_MAX];
@@ -369,7 +401,7 @@ typedef struct{
     int32_t white_level;
 
     /* A fixed black level offset for each of the Bayer
-       mosaic channels in RGGB order*/
+       mosaic channels */
     int32_t black_level_pattern[BLACK_LEVEL_PATTERN_CNT];
 
     /* Time taken before flash can fire again in nano secs */
@@ -478,6 +510,11 @@ typedef struct{
     /* Max size supported by ISP viewfinder path */
     cam_dimension_t max_viewfinder_size;
 
+    /* Max size supported by ISP encoder path */
+    cam_dimension_t max_encoder_size;
+
+    cam_dimension_t bokeh_snapshot_size;
+
     /* Analysis buffer requirements */
     cam_analysis_info_t analysis_info[CAM_ANALYSIS_INFO_MAX];
 
@@ -523,8 +560,14 @@ typedef struct{
 
     /* Dual cam calibration data */
     cam_related_system_calibration_data_t related_cam_calibration;
-    /* Whether camera timestamp is calibrated with sensor */
-    uint8_t timestamp_calibrated;
+
+    /* Meta_RAW capability */
+    uint8_t meta_raw_channel_count;
+    uint8_t vc[MAX_SIZES_CNT];
+    uint8_t dt[MAX_SIZES_CNT];
+    cam_format_t supported_meta_raw_fmts[CAM_FORMAT_MAX];
+    cam_dimension_t raw_meta_dim[MAX_SIZES_CNT];
+    cam_sub_format_type_t sub_fmt[CAM_FORMAT_SUBTYPE_MAX];
 } cam_capability_t;
 
 typedef enum {
@@ -548,9 +591,12 @@ typedef struct {
     uint32_t meta_stream_handle;  /* meta data stream ID. only valid if meta_present != 0 */
     uint32_t meta_buf_index;      /* buf index to meta data buffer. only valid if meta_present != 0 */
 
+    uint8_t is_offline_meta_bypass;
+
     /* opaque metadata required for reprocessing */
     int32_t private_data[MAX_METADATA_PRIVATE_PAYLOAD_SIZE_IN_BYTES];
     cam_rect_t crop_rect;
+    uint8_t is_uv_subsampled;
 } cam_reprocess_param;
 
 typedef struct {
@@ -637,6 +683,16 @@ typedef struct {
 
     /* if frames will not be received */
     uint8_t noFrameExpected;
+
+    /* DT for this stream */
+    int32_t dt;
+
+    /* VC for this stream */
+    int32_t vc;
+
+   /* Subformat for this stream */
+    cam_sub_format_type_t sub_format_type;
+
 } cam_stream_info_t;
 
 /*****************************************************************************
@@ -794,6 +850,8 @@ typedef struct {
     INCLUDE(CAM_INTF_META_LENS_FILTERDENSITY,           float,                       1);
     INCLUDE(CAM_INTF_META_LENS_FOCAL_LENGTH,            float,                       1);
     INCLUDE(CAM_INTF_META_LENS_FOCUS_DISTANCE,          float,                       1);
+    INCLUDE(CAM_INTF_META_FOCUS_VALUE,                  float,                       1);
+    INCLUDE(CAM_INTF_META_SPOT_LIGHT_DETECT,            uint8_t,                     1);
     INCLUDE(CAM_INTF_META_LENS_FOCUS_RANGE,             float,                       2);
     INCLUDE(CAM_INTF_META_LENS_STATE,                   cam_af_lens_state_t,         1);
     INCLUDE(CAM_INTF_META_LENS_OPT_STAB_MODE,           uint32_t,                    1);
@@ -907,8 +965,12 @@ typedef struct {
     INCLUDE(CAM_INTF_PARM_LONGSHOT_ENABLE,              int8_t,                      1);
     INCLUDE(CAM_INTF_PARM_TONE_MAP_MODE,                uint32_t,                    1);
     INCLUDE(CAM_INTF_META_TOUCH_AE_RESULT,              int32_t,                     1);
-    INCLUDE(CAM_INTF_PARM_DUAL_LED_CALIBRATION,         int32_t,                     1);
+    INCLUDE(CAM_INTF_PARM_LED_CALIBRATION,              cam_led_calibration_mode_t,  1);
     INCLUDE(CAM_INTF_PARM_ADV_CAPTURE_MODE,             uint8_t,                     1);
+    INCLUDE(CAM_INTF_PARM_QUADRA_CFA,                   int32_t,                     1);
+    INCLUDE(CAM_INTF_META_RAW,                          cam_dimension_t,             1);
+    INCLUDE(CAM_INTF_META_STREAM_INFO_FOR_PIC_RES,      cam_stream_size_info_t,      1);
+
 
     /* HAL3 specific */
     INCLUDE(CAM_INTF_META_STREAM_INFO,                  cam_stream_size_info_t,      1);
@@ -959,55 +1021,11 @@ typedef struct {
     INCLUDE(CAM_INTF_AF_STATE_TRANSITION,               uint8_t,                     1);
     INCLUDE(CAM_INTF_PARM_INITIAL_EXPOSURE_INDEX,       uint32_t,                    1);
     INCLUDE(CAM_INTF_PARM_INSTANT_AEC,                  uint8_t,                     1);
-    INCLUDE(CAM_INTF_META_HYBRID_AE,                    uint8_t,                     1);
-    INCLUDE(CAM_INTF_META_AF_SCENE_CHANGE,              uint8_t,                     1);
-    /* DevCamDebug metadata CAM_INTF.H */
-    INCLUDE(CAM_INTF_META_DEV_CAM_ENABLE,               uint8_t,                     1);
-    /* DevCamDebug metadata CAM_INTF.H AF */
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_LENS_POSITION,     int32_t,                     1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_TOF_CONFIDENCE,    int32_t,                     1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_TOF_DISTANCE,      int32_t,                     1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_LUMA,                    int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_HAF_STATE,               int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_MONITOR_PDAF_TARGET_POS, int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_MONITOR_PDAF_CONFIDENCE, int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_MONITOR_PDAF_REFOCUS,    int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_MONITOR_TOF_TARGET_POS,  int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_MONITOR_TOF_CONFIDENCE,  int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_MONITOR_TOF_REFOCUS,     int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_MONITOR_TYPE_SELECT,     int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_MONITOR_REFOCUS,         int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_MONITOR_TARGET_POS,      int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_SEARCH_PDAF_TARGET_POS,  int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_SEARCH_PDAF_NEXT_POS,    int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_SEARCH_PDAF_NEAR_POS,    int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_SEARCH_PDAF_FAR_POS,     int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_SEARCH_PDAF_CONFIDENCE,  int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_SEARCH_TOF_TARGET_POS,   int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_SEARCH_TOF_NEXT_POS,     int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_SEARCH_TOF_NEAR_POS,     int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_SEARCH_TOF_FAR_POS,      int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_SEARCH_TOF_CONFIDENCE,   int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_SEARCH_TYPE_SELECT,      int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_SEARCH_NEXT_POS,         int32_t,               1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AF_SEARCH_TARGET_POS,       int32_t,               1);
-    /* DevCamDebug metadata CAM_INTF.H AEC */
-    INCLUDE(CAM_INTF_META_DEV_CAM_AEC_TARGET_LUMA,      int32_t,                     1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AEC_COMP_LUMA,        int32_t,                     1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AEC_AVG_LUMA,         int32_t,                     1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AEC_CUR_LUMA,         int32_t,                     1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AEC_LINECOUNT,        int32_t,                     1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AEC_REAL_GAIN,        float,                       1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AEC_EXP_INDEX,        int32_t,                     1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AEC_LUX_IDX,          float,                       1);
-    /* DevCamDebug metadata CAM_INTF.H AWB */
-    INCLUDE(CAM_INTF_META_DEV_CAM_AWB_R_GAIN,           float,                       1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AWB_G_GAIN,           float,                       1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AWB_B_GAIN,           float,                       1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AWB_CCT,              int32_t,                     1);
-    INCLUDE(CAM_INTF_META_DEV_CAM_AWB_DECISION,         int32_t,                     1);
-    /* DevCamDebug metadata end */
-    INCLUDE(CAM_INTF_META_ISP_POST_STATS_SENSITIVITY,   float,                       1);
+    INCLUDE(CAM_INTF_META_REPROCESS_FLAGS,              uint8_t,                     1);
+    INCLUDE(CAM_INTF_PARM_JPEG_ENCODE_CROP,             cam_stream_crop_info_t,      1);
+    INCLUDE(CAM_INTF_PARM_JPEG_SCALE_DIMENSION,         cam_dimension_t,             1);
+    INCLUDE(CAM_INTF_META_FOCUS_DEPTH_INFO,             uint8_t,                     1);
+    INCLUDE(CAM_INTF_PARM_HAL_BRACKETING_HDR,           cam_hdr_param_t,             1);
 } metadata_data_t;
 
 /* Update clear_metadata_buffer() function when a new is_xxx_valid is added to

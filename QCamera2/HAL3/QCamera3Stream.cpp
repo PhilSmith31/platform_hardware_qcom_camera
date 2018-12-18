@@ -758,7 +758,7 @@ int32_t QCamera3Stream::cancelBuffer(uint32_t index)
     /* if (UNLIKELY(mBatchSize)) {
         FIXME
     } else */{
-        ALOGE("Calling cancel buf on idx:%d for stream type:%d",index, getMyType());
+        LOGE("Calling cancel buf on idx:%d for stream type:%d",index, getMyType());
         rc = mCamOps->cancel_buffer(mCamHandle, mChannelHandle, mHandle, index);
         if (rc < 0) {
             return FAILED_TRANSACTION;
@@ -1179,6 +1179,7 @@ int32_t QCamera3Stream::unmapBuf(uint8_t buf_type, uint32_t buf_idx, int32_t pla
 int32_t QCamera3Stream::setParameter(cam_stream_parm_buffer_t &param)
 {
     int32_t rc = NO_ERROR;
+    Mutex::Autolock lock(mParamLock);
     mStreamInfo->parm_buf = param;
     rc = mCamOps->set_stream_parms(mCamHandle,
                                    mChannelHandle,

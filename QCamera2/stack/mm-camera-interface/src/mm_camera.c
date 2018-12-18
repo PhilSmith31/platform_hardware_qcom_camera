@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -45,7 +45,6 @@
 #include "mm_camera_sock.h"
 #include "mm_camera_interface.h"
 #include "mm_camera.h"
-#include "cam_cond.h"
 
 #define SET_PARM_BIT32(parm, parm_arr) \
     (parm_arr[parm/32] |= (1<<(parm%32)))
@@ -264,6 +263,7 @@ int32_t mm_camera_open(mm_camera_obj_t *my_obj)
     int cam_idx = 0;
     const char *dev_name_value = NULL;
     int l_errno = 0;
+    pthread_condattr_t cond_attr;
 
     LOGD("begin\n");
 
@@ -344,10 +344,14 @@ int32_t mm_camera_open(mm_camera_obj_t *my_obj)
     }
 #endif /* DAEMON_PRESENT */
 
+    pthread_condattr_init(&cond_attr);
+    pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC);
+
     pthread_mutex_init(&my_obj->msg_lock, NULL);
     pthread_mutex_init(&my_obj->cb_lock, NULL);
     pthread_mutex_init(&my_obj->evt_lock, NULL);
-    PTHREAD_COND_INIT(&my_obj->evt_cond);
+    pthread_cond_init(&my_obj->evt_cond, &cond_attr);
+    pthread_condattr_destroy(&cond_attr);
 
     LOGD("Launch evt Thread in Cam Open");
     snprintf(my_obj->evt_thread.threadName, THREAD_NAME_SIZE, "CAM_Dispatch");
@@ -445,6 +449,7 @@ int32_t mm_camera_close(mm_camera_obj_t *my_obj)
     pthread_mutex_destroy(&my_obj->evt_lock);
     pthread_cond_destroy(&my_obj->evt_cond);
     pthread_mutex_unlock(&my_obj->cam_lock);
+
     return 0;
 }
 

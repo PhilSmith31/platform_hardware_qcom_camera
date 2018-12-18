@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are
@@ -369,8 +369,14 @@ QCameraStream::QCameraStream(QCameraAllocator &allocator,
     mFirstTimeStamp = 0;
     memset (&mStreamMetaMemory, 0,
             (sizeof(MetaMemory) * CAMERA_MIN_VIDEO_BATCH_BUFFERS));
+    pthread_condattr_t mCondAttr;
+
+    pthread_condattr_init(&mCondAttr);
+    pthread_condattr_setclock(&mCondAttr, CLOCK_MONOTONIC);
+
     pthread_mutex_init(&m_lock, NULL);
-    pthread_cond_init(&m_cond, NULL);
+    pthread_cond_init(&m_cond, &mCondAttr);
+    pthread_condattr_destroy(&mCondAttr);
 }
 
 /*===========================================================================
@@ -757,7 +763,6 @@ int32_t QCameraStream::init(QCameraHeapMemory *streamInfoBuf,
 err1:
     mCamOps->delete_stream(mCamHandle, mChannelHandle, mHandle);
     mHandle = 0;
-    mNumBufs = 0;
 done:
     return rc;
 }
@@ -798,8 +803,9 @@ int32_t QCameraStream::calcOffset(cam_stream_info_t *streamInfo)
                 &streamInfo->buf_planes);
         break;
     case CAM_STREAM_TYPE_POSTVIEW:
-        rc = mm_stream_calc_offset_post_view(streamInfo->fmt,
+        rc = mm_stream_calc_offset_post_view(streamInfo,
                 &dim,
+                &mPaddingInfo,
                 &streamInfo->buf_planes);
         break;
     case CAM_STREAM_TYPE_SNAPSHOT:
@@ -1179,13 +1185,27 @@ int32_t QCameraStream::bufDone(const void *opaque, bool isMetaData)
 {
     int32_t rc = NO_ERROR;
     int index = -1;
+    QCameraVideoMemory *mVideoMem = NULL;
 
     if ((mStreamInfo != NULL)
             && (mStreamInfo->streaming_mode == CAM_STREAMING_MODE_BATCH)
             && (mStreamBatchBufs != NULL)) {
         index = mStreamBatchBufs->getMatchBufIndex(opaque, isMetaData);
+        mVideoMem = (QCameraVideoMemory *)mStreamBatchBufs;
     } else if (mStreamBufs != NULL){
         index = mStreamBufs->getMatchBufIndex(opaque, isMetaData);
+        mVideoMem = (QCameraVideoMemory *)mStreamBufs;
+    }
+
+    //Close and delete duplicated native handle and FD's.
+    if (mVideoMem != NULL) {
+        rc = mVideoMem->closeNativeHandle(opaque, isMetaData);
+        if (rc != NO_ERROR) {
+            LOGE("Invalid video metadata");
+            return rc;
+        }
+    } else {
+        LOGE("Possible FD leak. Release recording called after stop");
     }
 
     if (index == -1 || index >= mNumBufs || mBufDefs == NULL) {
@@ -1892,6 +1912,14 @@ err1:
 int32_t QCameraStream::releaseBuffs()
 {
     int rc = NO_ERROR;
+
+    if (mBufAllocPid != 0) {
+        cond_signal(true);
+        LOGD("wait for buf allocation thread dead");
+        pthread_join(mBufAllocPid, NULL);
+        mBufAllocPid = 0;
+        LOGD("return from buf allocation thread");
+    }
 
     if (mStreamInfo->streaming_mode == CAM_STREAMING_MODE_BATCH) {
         return releaseBatchBufs(NULL);

@@ -35,7 +35,7 @@
 #include <utils/Mutex.h>
 
 // Camera dependencies
-#include "camera3.h"
+#include "hardware/camera3.h"
 
 extern "C" {
 #include "mm_camera_interface.h"
@@ -83,6 +83,7 @@ public:
 protected:
     struct QCamera3MemInfo {
         int fd;
+        int main_ion_fd;
         ion_user_handle_t handle;
         size_t size;
     };
@@ -95,7 +96,6 @@ protected:
     void *mPtr[MM_CAMERA_MAX_NUM_FRAMES];
     int32_t mCurrentFrameNumbers[MM_CAMERA_MAX_NUM_FRAMES];
     Mutex mLock;
-    int main_ion_fd = -1;
 };
 
 // Internal heap memory is used for memories used internally

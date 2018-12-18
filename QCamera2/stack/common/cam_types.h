@@ -35,7 +35,7 @@
 #include <media/msmb_camera.h>
 
 #define CAM_MAX_NUM_BUFS_PER_STREAM 64
-#define MAX_METADATA_PRIVATE_PAYLOAD_SIZE_IN_BYTES 6972
+#define MAX_METADATA_PRIVATE_PAYLOAD_SIZE_IN_BYTES 8096
 #define AWB_DEBUG_DATA_SIZE               (45000)
 #define AEC_DEBUG_DATA_SIZE               (5000)
 #define AF_DEBUG_DATA_SIZE                (50000)
@@ -107,10 +107,9 @@
 #define EXIF_IMAGE_DESCRIPTION_SIZE 100
 
 #define MAX_INFLIGHT_REQUESTS  6
-#define MAX_INFLIGHT_BLOB      3
+#define MAX_INFLIGHT_BLOB      6
 #define MIN_INFLIGHT_REQUESTS  3
 #define MIN_INFLIGHT_60FPS_REQUESTS (6)
-#define MAX_INFLIGHT_60FPS_REQUESTS (8)
 #define MAX_INFLIGHT_REPROCESS_REQUESTS 1
 #define MAX_INFLIGHT_HFR_REQUESTS (48)
 #define MIN_INFLIGHT_HFR_REQUESTS (40)
@@ -123,7 +122,7 @@
 
 #define RELCAM_CALIB_ROT_MATRIX_MAX 9
 #define RELCAM_CALIB_SURFACE_PARMS_MAX 32
-#define RELCAM_CALIB_RESERVED_MAX 62
+#define RELCAM_CALIB_RESERVED_MAX 50
 
 #define MAX_NUM_CAMERA_PER_BUNDLE    2 /* Max number of cameras per bundle */
 #define EXTRA_FRAME_SYNC_BUFFERS     4 /* Extra frame sync buffers in dc mode*/
@@ -290,6 +289,9 @@ typedef enum {
     CAM_FORMAT_JPEG_RAW_8BIT,
     CAM_FORMAT_META_RAW_8BIT,
 
+    /* generic 10-bit raw */
+    CAM_FORMAT_META_RAW_10BIT,
+
     /* QCOM RAW formats where data is packed into 64bit word.
      * 14BPP: 1 64-bit word contains 4 pixels p0 - p3, where most
      *       significant 4 bits are set to 0. P0 is stored at LSB.
@@ -367,6 +369,12 @@ typedef enum {
 
     CAM_FORMAT_MAX
 } cam_format_t;
+
+typedef enum {
+    CAM_FORMAT_SUBTYPE_HDR_STATS,
+    CAM_FORMAT_SUBTYPE_PDAF_STATS,
+    CAM_FORMAT_SUBTYPE_MAX
+} cam_sub_format_type_t;
 
 typedef enum {
     CAM_STREAM_TYPE_DEFAULT,       /* default stream type */
@@ -552,6 +560,12 @@ typedef struct {
     int32_t min_sensitivity;
     int32_t max_sensitivity;
 } cam_sensitivity_range_t;
+
+typedef enum {
+    CAM_ISO_PRIORITY,
+    CAM_EXP_PRIORITY,
+    CAM_DEFAULT_OFF,
+} cam_priority_mode_t;
 
 typedef enum {
     CAM_HFR_MODE_OFF,
@@ -868,6 +882,13 @@ typedef enum {
     CAM_SENSOR_HDR_MAX,
 } cam_sensor_hdr_type_t;
 
+typedef enum {
+    CAM_LED_CALIBRATION_MODE_OFF,
+    CAM_LED_CALIBRATION_MODE_DUAL,
+    CAM_LED_CALIBRATION_MODE_SINGLE,
+    CAM_LED_CALIBRATION_MODE_MAX
+} cam_led_calibration_mode_t;
+
 typedef struct  {
     int32_t left;
     int32_t top;
@@ -889,10 +910,11 @@ typedef enum {
 
 typedef enum {
     IS_TYPE_NONE,
+    IS_TYPE_CROP,
     IS_TYPE_DIS,
     IS_TYPE_GA_DIS,
-    IS_TYPE_EIS_1_0,
     IS_TYPE_EIS_2_0,
+    IS_TYPE_EIS_3_0,
     IS_TYPE_MAX
 } cam_is_type_t;
 
@@ -1252,12 +1274,24 @@ typedef struct {
 } cam_faces_data_t;
 
 #define CAM_HISTOGRAM_STATS_SIZE 256
+
+typedef enum {
+  CAM_STATS_CHANNEL_Y,
+  CAM_STATS_CHANNEL_GR,
+  CAM_STATS_CHANNEL_GB,
+  CAM_STATS_CHANNEL_R,
+  CAM_STATS_CHANNEL_B,
+  CAM_STATS_CHANNEL_ALL,
+  CAM_STATS_CHANNEL_MAX
+} cam_histogram_data_type;
+
 typedef struct {
     uint32_t max_hist_value;
     uint32_t hist_buf[CAM_HISTOGRAM_STATS_SIZE]; /* buf holding histogram stats data */
 } cam_histogram_data_t;
 
 typedef struct {
+    cam_histogram_data_type data_type;
     cam_histogram_data_t r_stats;
     cam_histogram_data_t b_stats;
     cam_histogram_data_t gr_stats;
@@ -1349,6 +1383,9 @@ typedef struct {
     cam_focus_mode_type focus_mode;        /* focus mode from backend */
     int32_t focus_pos;
     cam_af_flush_info_t flush_info;
+    uint8_t isDepth;
+    float focus_value;
+    uint8_t spot_light_detected;
 } cam_auto_focus_data_t;
 
 typedef struct {
@@ -1378,10 +1415,16 @@ typedef enum {
     NEED_FUTURE_FRAME,
 } cam_prep_snapshot_state_t;
 
-#define CC_GAINS_COUNT  4
+typedef enum {
+    CC_RED_GAIN,
+    CC_GREEN_RED_GAIN,
+    CC_GREEN_BLUE_GAIN,
+    CC_BLUE_GAIN,
+    CC_GAIN_MAX
+} cam_cc_gains_type_t;
 
 typedef struct {
-    float gains[CC_GAINS_COUNT];
+    float gains[CC_GAIN_MAX];
 } cam_color_correct_gains_t;
 
 typedef struct {
@@ -1616,7 +1659,7 @@ typedef struct {
     cam_stream_type_t type[MAX_NUM_STREAMS];
     cam_feature_mask_t postprocess_mask[MAX_NUM_STREAMS];
     cam_buffer_info_t buffer_info;
-    cam_is_type_t is_type;
+    cam_is_type_t is_type[MAX_NUM_STREAMS];
     cam_hfr_mode_t hfr_mode;
     cam_format_t format[MAX_NUM_STREAMS];
     uint32_t buf_alignment;
@@ -1624,8 +1667,10 @@ typedef struct {
     uint32_t min_scanline;
     uint8_t batch_size;
     cam_sync_type_t sync_type;
+    uint32_t dt[MAX_NUM_STREAMS];
+    uint32_t vc[MAX_NUM_STREAMS];
+    cam_sub_format_type_t sub_format_type[MAX_NUM_STREAMS];
 } cam_stream_size_info_t;
-
 
 typedef enum {
     CAM_INTF_OVERWRITE_MINI_CHROMATIX_OFFLINE,
@@ -1899,7 +1944,7 @@ typedef enum {
     CAM_INTF_PARM_CDS_MODE,
     CAM_INTF_PARM_TONE_MAP_MODE,
     CAM_INTF_PARM_CAPTURE_FRAME_CONFIG, /* 90 */
-    CAM_INTF_PARM_DUAL_LED_CALIBRATION,
+    CAM_INTF_PARM_LED_CALIBRATION,
     CAM_INTF_PARM_ADV_CAPTURE_MODE,
 
     /* stream based parameters */
@@ -2135,7 +2180,6 @@ typedef enum {
     /*Black level parameters*/
     CAM_INTF_META_LDAF_EXIF,
     CAM_INTF_META_BLACK_LEVEL_SOURCE_PATTERN,
-    /* Applied black level pattern in RGGB order */
     CAM_INTF_META_BLACK_LEVEL_APPLIED_PATTERN, /* 200 */
     CAM_INTF_META_CDS_DATA,
     /*3A low light level information*/
@@ -2165,63 +2209,31 @@ typedef enum {
     CAM_INTF_META_TOUCH_AE_RESULT,
     /* Param for updating initial exposure index value*/
     CAM_INTF_PARM_INITIAL_EXPOSURE_INDEX,
-    /* Gain applied post raw captrue prior to stats collection.
+    /* Gain applied post raw captrue.
        ISP digital gain */
     CAM_INTF_META_ISP_SENSITIVITY,
     /* Param for enabling instant aec*/
     CAM_INTF_PARM_INSTANT_AEC,
-    /* Whether to enable hybrid ae mode */
-    CAM_INTF_META_HYBRID_AE,
-    /* DevCamDebug metadata CAM_TYPES.h */
-    CAM_INTF_META_DEV_CAM_ENABLE,
-    /* DevCamDebug metadata CAM_TYPES.h AF */
-    CAM_INTF_META_DEV_CAM_AF_LENS_POSITION,
-    CAM_INTF_META_DEV_CAM_AF_TOF_CONFIDENCE,
-    CAM_INTF_META_DEV_CAM_AF_TOF_DISTANCE,
-    CAM_INTF_META_DEV_CAM_AF_LUMA,
-    CAM_INTF_META_DEV_CAM_AF_HAF_STATE,
-    CAM_INTF_META_DEV_CAM_AF_MONITOR_PDAF_TARGET_POS,
-    CAM_INTF_META_DEV_CAM_AF_MONITOR_PDAF_CONFIDENCE,
-    CAM_INTF_META_DEV_CAM_AF_MONITOR_PDAF_REFOCUS,
-    CAM_INTF_META_DEV_CAM_AF_MONITOR_TOF_TARGET_POS,
-    CAM_INTF_META_DEV_CAM_AF_MONITOR_TOF_CONFIDENCE,
-    CAM_INTF_META_DEV_CAM_AF_MONITOR_TOF_REFOCUS,
-    CAM_INTF_META_DEV_CAM_AF_MONITOR_TYPE_SELECT,
-    CAM_INTF_META_DEV_CAM_AF_MONITOR_REFOCUS,
-    CAM_INTF_META_DEV_CAM_AF_MONITOR_TARGET_POS,
-    CAM_INTF_META_DEV_CAM_AF_SEARCH_PDAF_TARGET_POS,
-    CAM_INTF_META_DEV_CAM_AF_SEARCH_PDAF_NEXT_POS,
-    CAM_INTF_META_DEV_CAM_AF_SEARCH_PDAF_NEAR_POS,
-    CAM_INTF_META_DEV_CAM_AF_SEARCH_PDAF_FAR_POS,
-    CAM_INTF_META_DEV_CAM_AF_SEARCH_PDAF_CONFIDENCE,
-    CAM_INTF_META_DEV_CAM_AF_SEARCH_TOF_TARGET_POS,
-    CAM_INTF_META_DEV_CAM_AF_SEARCH_TOF_NEXT_POS,
-    CAM_INTF_META_DEV_CAM_AF_SEARCH_TOF_NEAR_POS,
-    CAM_INTF_META_DEV_CAM_AF_SEARCH_TOF_FAR_POS,
-    CAM_INTF_META_DEV_CAM_AF_SEARCH_TOF_CONFIDENCE,
-    CAM_INTF_META_DEV_CAM_AF_SEARCH_TYPE_SELECT,
-    CAM_INTF_META_DEV_CAM_AF_SEARCH_NEXT_POS,
-    CAM_INTF_META_DEV_CAM_AF_SEARCH_TARGET_POS,
-    /* DevCamDebug metadata CAM_TYPES.h AEC */
-    CAM_INTF_META_DEV_CAM_AEC_TARGET_LUMA,
-    CAM_INTF_META_DEV_CAM_AEC_COMP_LUMA,
-    CAM_INTF_META_DEV_CAM_AEC_AVG_LUMA,
-    CAM_INTF_META_DEV_CAM_AEC_CUR_LUMA,
-    CAM_INTF_META_DEV_CAM_AEC_LINECOUNT,
-    CAM_INTF_META_DEV_CAM_AEC_REAL_GAIN,
-    CAM_INTF_META_DEV_CAM_AEC_EXP_INDEX,
-    CAM_INTF_META_DEV_CAM_AEC_LUX_IDX,
-    /* DevCamDebug metadata CAM_TYPES.h AWB */
-    CAM_INTF_META_DEV_CAM_AWB_R_GAIN,
-    CAM_INTF_META_DEV_CAM_AWB_G_GAIN,
-    CAM_INTF_META_DEV_CAM_AWB_B_GAIN,
-    CAM_INTF_META_DEV_CAM_AWB_CCT,
-    CAM_INTF_META_DEV_CAM_AWB_DECISION,
-    /* DevCamDebug metadata end */
-    /* AF scene change */
-    CAM_INTF_META_AF_SCENE_CHANGE,
-    /* Gain applied post stats collection in ISP */
-    CAM_INTF_META_ISP_POST_STATS_SENSITIVITY,
+    /* Param for tracking previous reprocessing activity */
+    CAM_INTF_META_REPROCESS_FLAGS,
+    /* Param of cropping information for JPEG encoder */
+    CAM_INTF_PARM_JPEG_ENCODE_CROP,
+    /* Param of scaling information for JPEG encoder */
+    CAM_INTF_PARM_JPEG_SCALE_DIMENSION,
+    /*Param for updating Quadra CFA mode */
+    CAM_INTF_PARM_QUADRA_CFA,
+    /* Meta Raw Dim */
+    CAM_INTF_META_RAW,
+    /* Number of streams and size of streams in
+       current configuration for pic res*/
+    CAM_INTF_META_STREAM_INFO_FOR_PIC_RES,
+    CAM_INTF_META_FOCUS_DEPTH_INFO,
+    /*Focus value output from af core*/
+    CAM_INTF_META_FOCUS_VALUE,
+    /*Spot light detection result output from af core*/
+    CAM_INTF_META_SPOT_LIGHT_DETECT,
+    /* HAL based HDR*/
+    CAM_INTF_PARM_HAL_BRACKETING_HDR,
     CAM_INTF_PARM_MAX
 } cam_intf_parm_type_t;
 
@@ -2336,7 +2348,7 @@ typedef struct {
 #define CAM_MAX_MAP_WIDTH         6
 #define CAM_MAX_SHADING_MAP_WIDTH 17
 #define CAM_MAX_SHADING_MAP_HEIGHT 13
-#define CAM_MAX_TONEMAP_CURVE_SIZE 64
+#define CAM_MAX_TONEMAP_CURVE_SIZE    512
 #define CAM_MAX_FLASH_BRACKETING    5
 
 typedef struct {
@@ -2443,11 +2455,15 @@ typedef struct {
 #define CAM_QTI_FEATURE_SW_TNR          ((cam_feature_mask_t)1UL<<30)
 #define CAM_QCOM_FEATURE_METADATA_PROCESSING ((cam_feature_mask_t)1UL<<31)
 #define CAM_QCOM_FEATURE_PAAF           (((cam_feature_mask_t)1UL)<<32)
+#define CAM_QCOM_FEATURE_QUADRA_CFA     (((cam_feature_mask_t)1UL)<<33)
+#define CAM_QTI_FEATURE_PPEISCORE       (((cam_feature_mask_t)1UL)<<34)
+#define CAM_QCOM_FEATURE_METADATA_BYPASS (((cam_feature_mask_t)1UL)<<35)
+#define CAM_QTI_FEATURE_RTB              (((cam_feature_mask_t)1UL)<<36)
 #define CAM_QCOM_FEATURE_PP_SUPERSET    (CAM_QCOM_FEATURE_DENOISE2D|CAM_QCOM_FEATURE_CROP|\
                                          CAM_QCOM_FEATURE_ROTATION|CAM_QCOM_FEATURE_SHARPNESS|\
                                          CAM_QCOM_FEATURE_SCALE|CAM_QCOM_FEATURE_CAC|\
                                          CAM_QCOM_FEATURE_EZTUNE|CAM_QCOM_FEATURE_CPP_TNR|\
-                                         CAM_QCOM_FEATURE_LLVD)
+                                         CAM_QCOM_FEATURE_LLVD|CAM_QCOM_FEATURE_QUADRA_CFA)
 
 #define CAM_QCOM_FEATURE_PP_PASS_1      CAM_QCOM_FEATURE_PP_SUPERSET
 #define CAM_QCOM_FEATURE_PP_PASS_2      CAM_QCOM_FEATURE_SCALE | CAM_QCOM_FEATURE_CROP;
@@ -2720,8 +2736,6 @@ typedef enum {
     CAM_PERF_NORMAL = 0,
     CAM_PERF_HIGH,
     CAM_PERF_HIGH_PERFORMANCE,
-    CAM_PERF_RESET,
-    CAM_PERF_SET
 } cam_perf_mode_t;
 
 typedef struct {
@@ -2791,6 +2805,21 @@ typedef struct {
     cam_event_type_t server_event_type;
     uint32_t status;
 } cam_event_t;
+
+typedef struct {
+    /* Information for DDM metadata*/
+    cam_stream_crop_info_t   sensor_crop_info; /* sensor crop info */
+    cam_stream_crop_info_t   camif_crop_info; /* CAMIF crop info */
+    cam_stream_crop_info_t   isp_crop_info; /* ISP crop info */
+    cam_stream_crop_info_t   cpp_crop_info; /* CPP crop info */
+    cam_focal_length_ratio_t af_focal_length_ratio; /* AF focal length ratio */
+    int32_t                  pipeline_flip; /* current pipeline flip and rotational parameters */
+    cam_rotation_info_t      rotation_info; /* rotation information */
+    cam_area_t               af_roi;        /* AF roi info */
+    /* Information for CPP reprocess */
+    cam_dyn_img_data_t       dyn_mask;      /* Post processing dynamic feature mask */
+    int32_t                  frame_number;  /* Backend frame number*/
+} cam_reprocess_info_t;
 
 /***********************************
 * ENUM definition for custom parameter type

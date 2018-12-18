@@ -54,8 +54,12 @@ static mm_camera_ctrl_t g_cam_ctrl;
 static pthread_mutex_t g_handler_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint16_t g_handler_history_count = 0; /* history count for handler */
 
-#define CAM_SENSOR_TYPE_MASK (1U<<24) // 24th (starting from 0) bit tells its a MAIN or AUX camera
-#define CAM_SENSOR_FORMAT_MASK (1U<<25) // 25th(starting from 0) bit tells its YUV sensor or not
+// 16th (starting from 0) bit tells its a BACK or FRONT camera
+#define CAM_SENSOR_FACING_MASK (1U<<16)
+// 24th (starting from 0) bit tells its a MAIN or AUX camera
+#define CAM_SENSOR_TYPE_MASK (1U<<24)
+// 25th (starting from 0) bit tells its YUV sensor or not
+#define CAM_SENSOR_FORMAT_MASK (1U<<25)
 
 /*===========================================================================
  * FUNCTION   : mm_camera_util_generate_handler
@@ -1613,9 +1617,16 @@ void get_sensor_info()
                 entity.group_id == MSM_CAMERA_SUBDEV_SENSOR) {
                 temp = entity.flags >> 8;
                 mount_angle = (temp & 0xFF) * 90;
-                facing = (temp & 0xFF00) >> 8;
-                type = ((entity.flags & CAM_SENSOR_TYPE_MASK) ?
-                        CAM_TYPE_AUX:CAM_TYPE_MAIN);
+                facing = ((entity.flags & CAM_SENSOR_FACING_MASK) ?
+                        CAMERA_FACING_FRONT:CAMERA_FACING_BACK);
+                /* TODO: Need to revisit this logic if front AUX is available. */
+                if ((unsigned int)facing == CAMERA_FACING_FRONT) {
+                    type = CAM_TYPE_STANDALONE;
+                } else if (entity.flags & CAM_SENSOR_TYPE_MASK) {
+                    type = CAM_TYPE_AUX;
+                } else {
+                    type = CAM_TYPE_MAIN;
+                }
                 is_yuv = ((entity.flags & CAM_SENSOR_FORMAT_MASK) ?
                         CAM_SENSOR_YUV:CAM_SENSOR_RAW);
                 LOGL("index = %u flag = %x mount_angle = %u "
@@ -1653,7 +1664,7 @@ void get_sensor_info()
 void sort_camera_info(int num_cam)
 {
     int idx = 0, i;
-    int8_t is_dual_cam = 0, is_aux_cam_exposed = 0;
+    int8_t is_yuv_aux_cam_exposed = 0;
     char prop[PROPERTY_VALUE_MAX];
     struct camera_info temp_info[MM_CAMERA_MAX_NUM_SENSORS];
     cam_sync_type_t temp_type[MM_CAMERA_MAX_NUM_SENSORS];
@@ -1667,30 +1678,21 @@ void sort_camera_info(int num_cam)
     memset(temp_mode, 0, sizeof(temp_mode));
     memset(temp_is_yuv, 0, sizeof(temp_is_yuv));
 
-    // Signifies whether system has to enable dual camera mode
+    // Signifies whether YUV AUX camera has to be exposed as physical camera
     memset(prop, 0, sizeof(prop));
-    property_get("persist.camera.dual.camera", prop, "0");
-    is_dual_cam = atoi(prop);
+    property_get("persist.camera.aux.yuv", prop, "0");
+    is_yuv_aux_cam_exposed = atoi(prop);
+    LOGI("YUV Aux camera exposed %d",is_yuv_aux_cam_exposed);
 
-    // Signifies whether AUX camera has to be exposed as physical camera
-    memset(prop, 0, sizeof(prop));
-    property_get("persist.camera.aux.camera", prop, "0");
-    is_aux_cam_exposed = atoi(prop);
-    LOGI("dualCamera:%d auxCamera %d",
-            is_dual_cam, is_aux_cam_exposed);
+    /* Order of the camera exposed is
+    Back main, Front main, Back Aux and then Front Aux.
+    It is because that lot of 3rd party cameras apps
+    blindly assume 0th is Back and 1st is front */
 
-    /*
-    1. If dual camera is enabled, dont hide any camera here. Further logic to handle AUX
-       cameras is handled in setupLogicalCameras().
-    2. If dual camera is not enabled, hide Front camera if AUX camera property is set.
-        In such case, application will see only back MAIN and back AUX cameras.
-    3. TODO: Need to revisit this logic if front AUX is available.
-    */
-
-    /* firstly save the main back cameras info*/
+    /* Firstly save the main back cameras info */
     for (i = 0; i < num_cam; i++) {
         if ((g_cam_ctrl.info[i].facing == CAMERA_FACING_BACK) &&
-            (g_cam_ctrl.cam_type[i] == CAM_TYPE_MAIN)) {
+            (g_cam_ctrl.cam_type[i] != CAM_TYPE_AUX)) {
             temp_info[idx] = g_cam_ctrl.info[i];
             temp_type[idx] = g_cam_ctrl.cam_type[i];
             temp_mode[idx] = g_cam_ctrl.cam_mode[i];
@@ -1701,43 +1703,42 @@ void sort_camera_info(int num_cam)
         }
     }
 
-    /* save the aux back cameras info*/
-    if (is_dual_cam || is_aux_cam_exposed) {
-        for (i = 0; i < num_cam; i++) {
-            if ((g_cam_ctrl.info[i].facing == CAMERA_FACING_BACK) &&
-                (g_cam_ctrl.cam_type[i] == CAM_TYPE_AUX)) {
-                temp_info[idx] = g_cam_ctrl.info[i];
-                temp_type[idx] = g_cam_ctrl.cam_type[i];
-                temp_mode[idx] = g_cam_ctrl.cam_mode[i];
-                temp_is_yuv[idx] = g_cam_ctrl.is_yuv[i];
-                LOGD("Found Back Aux Camera: i: %d idx: %d", i, idx);
-                memcpy(temp_dev_name[idx++],g_cam_ctrl.video_dev_name[i],
-                    MM_CAMERA_DEV_NAME_LEN);
-            }
-        }
-    }
-
-    if (is_dual_cam || !is_aux_cam_exposed) {
-        /* then save the front cameras info*/
-        for (i = 0; i < num_cam; i++) {
-            if ((g_cam_ctrl.info[i].facing == CAMERA_FACING_FRONT) &&
-                (g_cam_ctrl.cam_type[i] == CAM_TYPE_MAIN)) {
-                temp_info[idx] = g_cam_ctrl.info[i];
-                temp_type[idx] = g_cam_ctrl.cam_type[i];
-                temp_mode[idx] = g_cam_ctrl.cam_mode[i];
-                temp_is_yuv[idx] = g_cam_ctrl.is_yuv[i];
-                LOGD("Found Front Main Camera: i: %d idx: %d", i, idx);
-                memcpy(temp_dev_name[idx++],g_cam_ctrl.video_dev_name[i],
-                    MM_CAMERA_DEV_NAME_LEN);
-            }
-        }
-    }
-
-    //TODO: Need to revisit this logic if front AUX is available.
-    /* save the aux front cameras info*/
+    /* Save the main front cameras info */
     for (i = 0; i < num_cam; i++) {
         if ((g_cam_ctrl.info[i].facing == CAMERA_FACING_FRONT) &&
-            (g_cam_ctrl.cam_type[i] == CAM_TYPE_AUX)) {
+            (g_cam_ctrl.cam_type[i] != CAM_TYPE_AUX)) {
+            temp_info[idx] = g_cam_ctrl.info[i];
+            temp_type[idx] = g_cam_ctrl.cam_type[i];
+            temp_mode[idx] = g_cam_ctrl.cam_mode[i];
+            temp_is_yuv[idx] = g_cam_ctrl.is_yuv[i];
+            LOGD("Found Front Main Camera: i: %d idx: %d", i, idx);
+            memcpy(temp_dev_name[idx++],g_cam_ctrl.video_dev_name[i],
+                    MM_CAMERA_DEV_NAME_LEN);
+        }
+    }
+
+    /* Expose YUV AUX camera if persist.camera.aux.yuv is set to 1.
+    Otherwsie expose AUX camera if it is not YUV. */
+    for (i = 0; i < num_cam; i++) {
+        if ((g_cam_ctrl.info[i].facing == CAMERA_FACING_BACK) &&
+                (g_cam_ctrl.cam_type[i] == CAM_TYPE_AUX) &&
+                (is_yuv_aux_cam_exposed || !(g_cam_ctrl.is_yuv[i]))) {
+            temp_info[idx] = g_cam_ctrl.info[i];
+            temp_type[idx] = g_cam_ctrl.cam_type[i];
+            temp_mode[idx] = g_cam_ctrl.cam_mode[i];
+            temp_is_yuv[idx] = g_cam_ctrl.is_yuv[i];
+            LOGD("Found back Aux Camera: i: %d idx: %d", i, idx);
+            memcpy(temp_dev_name[idx++],g_cam_ctrl.video_dev_name[i],
+                MM_CAMERA_DEV_NAME_LEN);
+        }
+    }
+
+    /* Expose YUV AUX camera if persist.camera.aux.yuv is set to 1.
+    Otherwsie expose AUX camera if it is not YUV. */
+    for (i = 0; i < num_cam; i++) {
+        if ((g_cam_ctrl.info[i].facing == CAMERA_FACING_FRONT) &&
+                (g_cam_ctrl.cam_type[i] == CAM_TYPE_AUX) &&
+                (is_yuv_aux_cam_exposed || !(g_cam_ctrl.is_yuv[i]))) {
             temp_info[idx] = g_cam_ctrl.info[i];
             temp_type[idx] = g_cam_ctrl.cam_type[i];
             temp_mode[idx] = g_cam_ctrl.cam_mode[i];
@@ -1782,11 +1783,9 @@ uint8_t get_num_of_cameras()
     int num_media_devices = 0;
     int8_t num_cameras = 0;
     char subdev_name[32];
-    char prop[PROPERTY_VALUE_MAX];
-#ifdef DAEMON_PRESENT
     int32_t sd_fd = -1;
     struct sensor_init_cfg_data cfg;
-#endif
+    char prop[PROPERTY_VALUE_MAX];
 
     LOGD("E");
 
@@ -1853,7 +1852,6 @@ uint8_t get_num_of_cameras()
         dev_fd = -1;
     }
 
-#ifdef DAEMON_PRESENT
     /* Open sensor_init subdev */
     sd_fd = open(subdev_name, O_RDWR);
     if (sd_fd < 0) {
@@ -1867,7 +1865,7 @@ uint8_t get_num_of_cameras()
         LOGE("failed");
     }
     close(sd_fd);
-#endif
+    dev_fd = -1;
 
 
     num_media_devices = 0;
